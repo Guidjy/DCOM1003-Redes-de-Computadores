@@ -1,0 +1,21 @@
+{
+  "target": "bmv2",
+  "p4info": "build/nat.p4.p4info.txt",
+  "bmv2_json": "build/nat.p4.json",
+  "table_entries": [
+    {
+      "table": "MyIngress.static_dnat",
+      "match": {
+        "meta.nat_port": 8080
+      },
+      "action_name": "MyIngress.port_forward",
+      "action_params": {
+        "internal_ip": "10.0.0.1",
+        "internal_port": 80,
+        "egress_port": 1,
+        "dst_mac": "08:00:00:00:01:01",
+        "src_mac": "08:00:00:00:01:03"
+      }
+    }
+  ]
+}
