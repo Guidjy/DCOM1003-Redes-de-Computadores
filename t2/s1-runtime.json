@@ -16,6 +16,20 @@
         "dst_mac": "08:00:00:00:01:01",
         "src_mac": "08:00:00:00:01:03"
       }
+    },
+    {
+      "table": "MyIngress.static_snat",
+      "match": {
+        "hdr.ipv4.srcAddr": "10.0.0.1",
+        "meta.nat_port": 80
+      },
+      "action_name": "MyIngress.reverse_port_forward",
+      "action_params": {
+        "external_port": 8080,
+        "egress_port": 3,
+        "dst_mac": "08:00:00:00:03:03",
+        "src_mac": "08:00:00:00:03:01"
+      }
     }
   ]
 }
