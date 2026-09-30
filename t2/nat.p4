@@ -225,6 +225,31 @@ control MyIngress(inout headers hdr,
         size = 1024;
         default_action = drop(); // se nao tiver regra para a porta, descarta
     }
+    
+    // Acao para reverter o port forwarding: mascara com a porta externa original
+    action reverse_port_forward(bit<16> external_port, bit<9> egress_port, macAddr_t dst_mac, macAddr_t src_mac) {
+        if (hdr.tcp.isValid()) {
+            hdr.tcp.srcPort = external_port;
+        } else if (hdr.udp.isValid()) {
+            hdr.udp.srcPort = external_port;
+        }
+        hdr.ipv4.srcAddr = IP_PUBLIC_S1;
+        forward(egress_port, dst_mac, src_mac);
+    }
+
+    // Tabela estatica para o trafego de retorno do servidor interno
+    table static_snat {
+        key = {
+            hdr.ipv4.srcAddr: exact; // IP do servidor interno (ex: 10.0.0.1)
+            meta.nat_port: exact;    // Porta do servidor interno (ex: 80)
+        }
+        actions = {
+            reverse_port_forward;
+            NoAction;
+        }
+        size = 1024;
+        default_action = NoAction();
+    }
 
     apply {
         // se o pacote nao tiver cabecalho ipv4 valido, joga fora
@@ -247,8 +272,8 @@ control MyIngress(inout headers hdr,
 
         // FLUXO DE SAIDA: H1 ou H2 -> H3
         // verifica se o pacote veio de uma das maquinas internas (portas fisicas 1 ou 2)
+        // FLUXO DE SAIDA: H1 ou H2 -> H3
         if (standard_metadata.ingress_port == 1 || standard_metadata.ingress_port == 2) {
-            // descobre qual eh a porta de origem real usada pela maquina interna (tcp ou udp)
             bit<16> orig_port = 0;
             if (hdr.tcp.isValid()) {
                 orig_port = hdr.tcp.srcPort;
@@ -256,21 +281,22 @@ control MyIngress(inout headers hdr,
                 orig_port = hdr.udp.srcPort;
             }
 
-            // le a memoria para checar se a porta original ja esta sendo usada por outra maquina
-            bit<1> is_busy = 0;
-            reg_port_allocated.read(is_busy, (bit<32>)orig_port);
+            // 1. Verifica se eh uma resposta de um port_forward estatico
+            meta.nat_port = orig_port;
+            if (!static_snat.apply().hit) {
+                
+                // 2. Se a tabela estatica der "miss", entao eh trafego dinamico comum
+                bit<1> is_busy = 0;
+                reg_port_allocated.read(is_busy, (bit<32>)orig_port);
 
-            bit<16> ext_port = orig_port;
+                bit<16> ext_port = orig_port;
 
-            // caso de colisao: a porta ja esta alocada por outra conexao ativa
-            if (is_busy == 1) {
-                // traduz para uma nova porta deslocando o valor para nao dar conflito
-                ext_port = orig_port + 10000;
+                if (is_busy == 1) {
+                    ext_port = orig_port + 10000;
+                }
+
+                nat_outbound(ext_port, 3, MAC_H3, MAC_S1_P3);
             }
-            // caso sem colisao: a porta original esta livre e eh preservada intacta
-
-            // aplica nat de saida passando a porta escolhida e envia pela porta 3 (para o H3)
-            nat_outbound(ext_port, 3, MAC_H3, MAC_S1_P3);
         }
 
         // FLUXO DE RETORNO: H3 -> H1 ou H2
